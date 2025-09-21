@@ -1,17 +1,14 @@
-
 name: Deploy API (.NET) to App Service (AFD Private Link)
+
 on:
   push:
-    branches: [ master ]
+    branches: [ master, main ]
     paths:
       - 'api/**'
       - '.github/workflows/deploy-api.yml'
-
-env:
-  AZURE_RG: ${{ vars.AZURE_RG }}
-  WEBAPP_NAME: ${{ vars.WEBAPP_NAME }}
-  AFD_PROFILE: ${{ vars.AFD_PROFILE }}
-  AFD_ENDPOINT: ${{ vars.AFD_ENDPOINT }}
+  pull_request_review:
+    types: [submitted]
+  workflow_dispatch:
 
 permissions:
   id-token: write
@@ -19,9 +16,24 @@ permissions:
 
 jobs:
   deploy-api:
+    # Only run on approval OR on push (merge) that touches api/** or workflow
+    if: >
+      (github.event_name == 'pull_request_review' && github.event.review.state == 'approved')
+      || (github.event_name == 'push')
+      || (github.event_name == 'workflow_dispatch')
     runs-on: ubuntu-latest
+
+    env:
+      AZURE_RG: ${{ vars.AZURE_RG }}
+      WEBAPP_NAME: ${{ vars.WEBAPP_NAME }}
+      AFD_PROFILE: ${{ vars.AFD_PROFILE }}
+      AFD_ENDPOINT: ${{ vars.AFD_ENDPOINT }}
+
     steps:
       - uses: actions/checkout@v4
+        with:
+          # On approval, build exactly what got approved
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
 
       - name: Setup .NET
         uses: actions/setup-dotnet@v4
