@@ -249,7 +249,7 @@ resource "azurerm_cdn_frontdoor_route" "route_spa" {
 
 # ---------------- Outputs ----------------
 data "azuread_client_config" "current" {}
-
+output "resource_group_name" { value = azurerm_resource_group.rg.name }
 output "tenant_id" { value = data.azuread_client_config.current.tenant_id }
 output "spa_client_id" { value = azuread_application.spa.client_id }
 output "api_identifier" { value = azuread_application_identifier_uri.api.identifier_uri }
