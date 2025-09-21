@@ -1,5 +1,7 @@
 name: Deploy SPA (Angular) to Static Website + Purge AFD
 
+
+
 on:
   push:
     branches: [ master, main ]
