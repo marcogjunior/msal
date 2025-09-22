@@ -1,4 +1,5 @@
 name: Deploy API (.NET) to App Service (AFD Private Link)
+
 on:
   push:
     branches: [ master, main ]
@@ -15,7 +16,6 @@ permissions:
 
 jobs:
   deploy-api:
-    # Only run on approval OR on push (merge) that touches api/** or workflow
     if: >
       (github.event_name == 'pull_request_review' && github.event.review.state == 'approved')
       || (github.event_name == 'push')
@@ -32,7 +32,6 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          # On approval, build exactly what got approved
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
 
       - name: Setup .NET
@@ -46,8 +45,25 @@ jobs:
           client-id: ${{ secrets.AZURE_CLIENT_ID }}
           tenant-id: ${{ secrets.AZURE_TENANT_ID }}
           subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
-          # keep false once RBAC is correct; true can help avoid early fail
-          allow-no-subscriptions: false
+
+      - name: Resolve Storage Account name
+        id: sa
+        run: |
+          if [ -n "${DEPLOY_SA_NAME:-}" ]; then
+            echo "name=$DEPLOY_SA_NAME" >> "$GITHUB_OUTPUT"
+          elif [ -n "${DEPLOY_SA_NAME:-}" ]; then
+            echo "name=$DEPLOY_SA_NAME" >> "$GITHUB_OUTPUT"
+          else
+            echo "ERROR: Set repo variable DEPLOY_SA_NAME or DEPLOY_SA_NAME." >&2
+            exit 1
+          fi
+
+      # NEW: export for Azure CLI auto-detection
+      - name: Export AZURE_STORAGE_ACCOUNT
+        run: |
+          echo "AZURE_STORAGE_ACCOUNT=${{ steps.sa.outputs.name }}" >> $GITHUB_ENV
+          echo "Using SA: ${{ steps.sa.outputs.name }}"
+          az storage account show -n "${{ steps.sa.outputs.name }}" -g "$AZURE_RG" -o table
 
       - name: Show Azure context (debug)
         run: |
@@ -60,22 +76,18 @@ jobs:
           set -e
           dotnet restore ./api/*.csproj
           dotnet publish ./api/*.csproj -c Release -o "$RUNNER_TEMP/api-publish"
-          echo "Publish dir: $RUNNER_TEMP/api-publish"
           ls -la "$RUNNER_TEMP/api-publish"
 
       - name: Package artifact (zip)
         run: |
           cd "$RUNNER_TEMP/api-publish"
           zip -r "$RUNNER_TEMP/api.zip" .
-          echo "Zipped to $RUNNER_TEMP/api.zip"
           ls -lh "$RUNNER_TEMP/api.zip"
 
-      # ==== Run-From-Package flow (no Kudu/SCM dependency) ====
-      - name: Ensure deploy container exists (private)
+      - name: Ensure 'deploy' container exists (private)
         run: |
           az storage container create \
             --name deploy \
-            --account-name "$DEPLOY_SA_NAME" \
             --auth-mode login \
             --public-access off
 
@@ -84,7 +96,6 @@ jobs:
         run: |
           NAME="api-$(date +%s).zip"
           az storage blob upload \
-            --account-name "$DEPLOY_SA_NAME" \
             --container-name deploy \
             --name "$NAME" \
             --file "$RUNNER_TEMP/api.zip" \
@@ -92,12 +103,12 @@ jobs:
             --auth-mode login
           echo "name=$NAME" >> "$GITHUB_OUTPUT"
 
+      # CHANGED: add --auth-mode login + --as-user + rely on AZURE_STORAGE_ACCOUNT
       - name: Generate short-lived user SAS (UDS)
         id: sas
         run: |
           EXPIRES=$(date -u -d '60 minutes' +%Y-%m-%dT%H:%MZ)
           URL=$(az storage blob generate-sas \
-            --account-name "${{ steps.sa.outputs.name }}" \
             --container-name deploy \
             --name "${{ steps.up.outputs.name }}" \
             --permissions r \
@@ -107,7 +118,6 @@ jobs:
             --auth-mode login \
             --full-uri -o tsv)
           echo "url=${URL}" >> "$GITHUB_OUTPUT"
-
 
       - name: Configure WEBSITE_RUN_FROM_PACKAGE
         run: |
