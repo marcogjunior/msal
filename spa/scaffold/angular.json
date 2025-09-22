@@ -8,33 +8,24 @@
       "sourceRoot": "src",
       "architect": {
         "build": {
-          "builder": "@angular-devkit/build-angular:browser",
+          "builder": "@angular-devkit/build-angular:application",
           "options": {
             "outputPath": "dist/angular-msal-graph-example",
             "index": "src/index.html",
-            "main": "src/main.ts",
-            "polyfills": [],
-            "tsConfig": "tsconfig.json",
+            "browser": "src/main.ts",
+            "tsConfig": "tsconfig.app.json",
+            "polyfills": ["zone.js"],
             "assets": ["src/favicon.ico", "src/assets"],
             "styles": ["src/styles.css"],
-            "scripts": []
+            "inlineStyleLanguage": "css"
           },
-          "configurations": {
-            "production": {
-              "optimization": true,
-              "extractLicenses": true,
-              "inspect": false
-            }
-          }
+          "configurations": { "production": { "optimization": true, "extractLicenses": true } }
         },
-        "serve": {
-          "builder": "@angular-devkit/build-angular:dev-server",
-          "options": {
-            "browserTarget": "angular-msal-graph-example:build"
-          }
-        }
+        "serve": { "builder": "@angular-devkit/build-angular:dev-server", "options": { "buildTarget": "angular-msal-graph-example:build" } }
       }
     }
   },
-  "defaultProject": "angular-msal-graph-example"
+  "cli": {
+    "analytics": "e00c1062-7a7c-4fea-a4db-4ea18f8dd241"
+  }
 }
