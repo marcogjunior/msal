@@ -1,19 +1,45 @@
-import { NgModule } from '@angular/core';
+import { HTTP_INTERCEPTORS, HttpClientModule } from '@angular/common/http';
+import { APP_INITIALIZER, NgModule } from '@angular/core';
 import { BrowserModule } from '@angular/platform-browser';
-import { HttpClientModule, HTTP_INTERCEPTORS } from '@angular/common/http';
 import { RouterModule } from '@angular/router';
-import { MsalModule, MsalRedirectComponent, MsalGuard, MsalService, MSAL_INSTANCE, MSAL_GUARD_CONFIG, MSAL_INTERCEPTOR_CONFIG, MsalInterceptor } from '@azure/msal-angular';
+
+import {
+  MSAL_GUARD_CONFIG,
+  MSAL_INSTANCE,
+  MSAL_INTERCEPTOR_CONFIG,
+  MsalGuard,
+  MsalInterceptor,
+  MsalModule,
+  MsalRedirectComponent,
+  MsalService
+} from '@azure/msal-angular';
+
+import { IPublicClientApplication } from '@azure/msal-browser'; // <-- importa a interface
+import { AppRoutingModule } from './app-routing.module';
 import { AppComponent } from './app.component';
 import { AuthComponent } from './auth/auth.component';
+import {
+  MSALGuardConfigFactory,
+  MSALInstanceFactory,
+  MSALInterceptorConfigFactory
+} from './core/msal-config';
 import { UserPageComponent } from './user/user-page.component';
-import { MSALInstanceFactory, MSALGuardConfigFactory, MSALInterceptorConfigFactory } from './core/msal-config';
-import { AppRoutingModule } from './app-routing.module';
+
+// >>> ADICIONE ESTA FUNÇÃO <<<
+export function msalAppInitializer(instance: IPublicClientApplication) {
+  // Angular espera uma função que retorne Promise<void>
+  return () => instance.initialize();
+}
 
 @NgModule({
   declarations: [AppComponent, AuthComponent, UserPageComponent],
   imports: [BrowserModule, HttpClientModule, RouterModule, AppRoutingModule, MsalModule],
   providers: [
     { provide: MSAL_INSTANCE, useFactory: MSALInstanceFactory },
+
+    // >>> ADICIONE ESTE PROVIDER <<<
+    { provide: APP_INITIALIZER, useFactory: msalAppInitializer, deps: [MSAL_INSTANCE], multi: true },
+
     { provide: MSAL_GUARD_CONFIG, useFactory: MSALGuardConfigFactory },
     { provide: MSAL_INTERCEPTOR_CONFIG, useFactory: MSALInterceptorConfigFactory },
     MsalService,
