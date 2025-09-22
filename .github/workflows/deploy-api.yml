@@ -92,19 +92,22 @@ jobs:
             --auth-mode login
           echo "name=$NAME" >> "$GITHUB_OUTPUT"
 
-      - name: Generate short-lived SAS URL
+      - name: Generate short-lived user SAS (UDS)
         id: sas
         run: |
           EXPIRES=$(date -u -d '60 minutes' +%Y-%m-%dT%H:%MZ)
-          SAS=$(az storage blob generate-sas \
-            --account-name "$DEPLOY_SA_NAME" \
+          URL=$(az storage blob generate-sas \
+            --account-name "${{ steps.sa.outputs.name }}" \
             --container-name deploy \
             --name "${{ steps.up.outputs.name }}" \
             --permissions r \
             --expiry "$EXPIRES" \
             --https-only \
-            --auth-mode login -o tsv)
-          echo "url=https://${DEPLOY_SA_NAME}.blob.core.windows.net/deploy/${{ steps.up.outputs.name }}?${SAS}" >> "$GITHUB_OUTPUT"
+            --as-user \
+            --auth-mode login \
+            --full-uri -o tsv)
+          echo "url=${URL}" >> "$GITHUB_OUTPUT"
+
 
       - name: Configure WEBSITE_RUN_FROM_PACKAGE
         run: |
