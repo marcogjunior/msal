@@ -28,6 +28,7 @@ jobs:
       AFD_PROFILE: ${{ vars.AFD_PROFILE }}
       AFD_ENDPOINT: ${{ vars.AFD_ENDPOINT }}
       DEPLOY_SA_NAME: ${{ vars.DEPLOY_SA_NAME }}
+      
 
     steps:
       - uses: actions/checkout@v4
