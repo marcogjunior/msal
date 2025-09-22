@@ -28,6 +28,7 @@ jobs:
       WEBAPP_NAME: ${{ vars.WEBAPP_NAME }}
       AFD_PROFILE: ${{ vars.AFD_PROFILE }}
       AFD_ENDPOINT: ${{ vars.AFD_ENDPOINT }}
+      DEPLOY_SA_NAME: ${{ vars.DEPLOY_SA_NAME }}
 
     steps:
       - uses: actions/checkout@v4
@@ -46,6 +47,14 @@ jobs:
           client-id: ${{ secrets.AZURE_CLIENT_ID }}
           tenant-id: ${{ secrets.AZURE_TENANT_ID }}
           subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+          # keep false once RBAC is correct; true can help avoid early fail
+          allow-no-subscriptions: false
+
+      - name: Show Azure context (debug)
+        run: |
+          az account show
+          az group show -n "$AZURE_RG"
+          az webapp show -g "$AZURE_RG" -n "$WEBAPP_NAME"
 
       - name: Build & Publish (.NET)
         run: |
@@ -54,7 +63,7 @@ jobs:
           dotnet publish ./api/*.csproj -c Release -o "$RUNNER_TEMP/api-publish"
           echo "Publish dir: $RUNNER_TEMP/api-publish"
           ls -la "$RUNNER_TEMP/api-publish"
-      
+
       - name: Package artifact (zip)
         run: |
           cd "$RUNNER_TEMP/api-publish"
@@ -62,14 +71,51 @@ jobs:
           echo "Zipped to $RUNNER_TEMP/api.zip"
           ls -lh "$RUNNER_TEMP/api.zip"
 
-      - name: Deploy to App Service (zip)
+      # ==== Run-From-Package flow (no Kudu/SCM dependency) ====
+      - name: Ensure deploy container exists (private)
         run: |
-          az webapp deploy \
+          az storage container create \
+            --name deploy \
+            --account-name "$DEPLOY_SA_NAME" \
+            --auth-mode login \
+            --public-access off
+
+      - name: Upload package to Blob
+        id: up
+        run: |
+          NAME="api-$(date +%s).zip"
+          az storage blob upload \
+            --account-name "$DEPLOY_SA_NAME" \
+            --container-name deploy \
+            --name "$NAME" \
+            --file "$RUNNER_TEMP/api.zip" \
+            --overwrite \
+            --auth-mode login
+          echo "name=$NAME" >> "$GITHUB_OUTPUT"
+
+      - name: Generate short-lived SAS URL
+        id: sas
+        run: |
+          EXPIRES=$(date -u -d '60 minutes' +%Y-%m-%dT%H:%MZ)
+          SAS=$(az storage blob generate-sas \
+            --account-name "$DEPLOY_SA_NAME" \
+            --container-name deploy \
+            --name "${{ steps.up.outputs.name }}" \
+            --permissions r \
+            --expiry "$EXPIRES" \
+            --https-only \
+            --auth-mode login -o tsv)
+          echo "url=https://${DEPLOY_SA_NAME}.blob.core.windows.net/deploy/${{ steps.up.outputs.name }}?${SAS}" >> "$GITHUB_OUTPUT"
+
+      - name: Configure WEBSITE_RUN_FROM_PACKAGE
+        run: |
+          az webapp config appsettings set \
             --resource-group "$AZURE_RG" \
             --name "$WEBAPP_NAME" \
-            --type zip \
-            --src-path "$RUNNER_TEMP/api.zip"
+            --settings WEBSITE_RUN_FROM_PACKAGE="${{ steps.sas.outputs.url }}"
 
+      - name: Restart app
+        run: az webapp restart -g "$AZURE_RG" -n "$WEBAPP_NAME"
 
       - name: Purge AFD endpoint cache
         if: ${{ env.AFD_PROFILE != '' && env.AFD_ENDPOINT != '' }}
