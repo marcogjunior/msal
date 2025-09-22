@@ -22,7 +22,7 @@ concurrency:
 env:
   AZURE_RG: ${{ vars.AZURE_RG }}
   # Optional override: repo variable with the folder that contains package.json
-  SPA_ROOT: ${{ vars.SPA_ROOT }}
+  SPA_ROOT: spa/scaffold
   # One of these must be set in repo Variables
   DEPLOY_SA_NAME: ${{ vars.DEPLOY_SA_NAME }}
 
