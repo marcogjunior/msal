@@ -108,37 +108,45 @@ jobs:
         run: |
           if [ -n "${DEPLOY_SA_NAME:-}" ]; then
             echo "name=$DEPLOY_SA_NAME" >> "$GITHUB_OUTPUT"
-          elif [ -n "${DEPLOY_SA_NAME:-}" ]; then
-            echo "name=$DEPLOY_SA_NAME" >> "$GITHUB_OUTPUT"
+          elif [ -n "${STORAGE_ACCOUNT_NAME:-}" ]; then
+            echo "name=$STORAGE_ACCOUNT_NAME" >> "$GITHUB_OUTPUT"
           else
-            echo "ERROR: Set repo variable DEPLOY_SA_NAME or DEPLOY_SA_NAME." >&2; exit 1
+            echo "ERROR: Set repo variable DEPLOY_SA_NAME or STORAGE_ACCOUNT_NAME." >&2
+            exit 1
           fi
 
       - name: Export AZURE_STORAGE_ACCOUNT for CLI
+        shell: bash
         run: |
           echo "AZURE_STORAGE_ACCOUNT=${{ steps.sa.outputs.name }}" >> $GITHUB_ENV
           az storage account show -n "${{ steps.sa.outputs.name }}" -g "$AZURE_RG" -o table
 
-      # 5) Install & Build Angular from detected root
+
+      # 5) Install & Build Angular from detected root (tenta ci -> fallback install)
       - name: Install & Build Angular
         working-directory: ${{ steps.root.outputs.dir }}
-        env:
-          PM: ${{ steps.pm.outputs.pm }}
-          LOCK: ${{ steps.pm.outputs.lock }}
         shell: bash
         run: |
           set -e
-          corepack enable || true
-          if [ "$PM" = "pnpm" ]; then
-            if [ -n "$LOCK" ]; then pnpm i --frozen-lockfile; else pnpm i; fi
-            pnpm build || npx -y @angular/cli@latest ng build --configuration production
-          elif [ "$PM" = "yarn" ]; then
-            if [ -n "$LOCK" ]; then yarn install --frozen-lockfile; else yarn install; fi
-            yarn build || npx -y @angular/cli@latest ng build --configuration production
+          npm config set fund false
+          npm config set audit false
+
+          if [ -f package-lock.json ]; then
+            echo "Trying npm ci (lockfile present)..."
+            npm ci || (echo "npm ci failed due to lock mismatch → regenerating lock" && rm -f package-lock.json && npm install)
           else
-            if [ -n "$LOCK" ]; then npm ci; else npm install; fi
-            npm run build --if-present || npx -y @angular/cli@latest ng build --configuration production
+            echo "No lockfile → npm install"
+            npm install
           fi
+
+          # usa o CLI local se existir; senão, pega o major do package.json (padrão 18)
+          if npx --no-install ng version >/dev/null 2>&1; then
+            npx --no-install ng build --configuration production
+          else
+            MAJOR=$(node -e "try{const p=require('./package.json');let v=(p.devDependencies&&p.devDependencies['@angular/cli'])||(p.dependencies&&p.dependencies['@angular/cli'])||'';if(!v){process.stdout.write('18');}else{const m=v.match(/\\d+/);process.stdout.write(m?m[0]:'18');}}catch{process.stdout.write('18');}")
+            npx -y @angular/cli@${MAJOR} ng build --configuration production
+          fi
+
 
       # 6) Detect dist output (first index.html)
       - name: Detect Angular output path
