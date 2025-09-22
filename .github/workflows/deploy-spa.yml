@@ -102,22 +102,44 @@ jobs:
         working-directory: ${{ env.SPA_ROOT }}
         env:
           PM: ${{ steps.pm.outputs.pm }}
+          LOCK: ${{ steps.pm.outputs.lock }}
         shell: bash
         run: |
           set -e
           corepack enable || true
+
           if [ "$PM" = "pnpm" ]; then
-            pnpm i --frozen-lockfile
+            if [ -n "$LOCK" ]; then pnpm i --frozen-lockfile; else pnpm i; fi
             pnpm build || npx -y @angular/cli@latest ng build --configuration production
+
           elif [ "$PM" = "yarn" ]; then
-            yarn install --frozen-lockfile
+            if [ -n "$LOCK" ]; then yarn install --frozen-lockfile; else yarn install; fi
             yarn build || npx -y @angular/cli@latest ng build --configuration production
-          else
-            npm ci
+
+          else  # npm
+            if [ -n "$LOCK" ]; then npm ci; else npm install; fi
             npm run build --if-present || npx -y @angular/cli@latest ng build --configuration production
           fi
 
-      # Find dist/**/index.html under spa/scaffold
+              working-directory: ${{ env.SPA_ROOT }}
+              env:
+                PM: ${{ steps.pm.outputs.pm }}
+              shell: bash
+              run: |
+                set -e
+                corepack enable || true
+                if [ "$PM" = "pnpm" ]; then
+                  pnpm i --frozen-lockfile
+                  pnpm build || npx -y @angular/cli@latest ng build --configuration production
+                elif [ "$PM" = "yarn" ]; then
+                  yarn install --frozen-lockfile
+                  yarn build || npx -y @angular/cli@latest ng build --configuration production
+                else
+                  npm ci
+                  npm run build --if-present || npx -y @angular/cli@latest ng build --configuration production
+                fi
+
+            # Find dist/**/index.html under spa/scaffold
       - name: Detect Angular output path
         id: outpath
         shell: bash
