@@ -1,8 +1,8 @@
 import { Component } from '@angular/core';
-import { MsalService } from '@azure/msal-angular';
-import { RedirectRequest, PopupRequest } from '@azure/msal-browser';
 import { Router } from '@angular/router';
-import { environment } from '../../../src/environments/environment';
+import { MsalService } from '@azure/msal-angular';
+import { PopupRequest, RedirectRequest } from '@azure/msal-browser';
+import { environment } from '../../environments/environment';
 
 @Component({
   selector: 'app-auth',
@@ -27,15 +27,21 @@ export class AuthComponent {
 
   loginRedirect() {
     const req: RedirectRequest = { scopes: environment.graph.scopes };
-    this.msal.loginRedirect(req);
+    // Opcional: subscribe para “consumir” o Observable (não é obrigatório, pois fará redirect)
+    this.msal.loginRedirect(req).subscribe();
   }
 
   loginPopup() {
     const req: PopupRequest = { scopes: environment.graph.scopes };
-    this.msal.loginPopup(req).then(() => this.router.navigateByUrl('/me'));
+    // ❌ .then(...)  →  ✅ .subscribe(...)
+    this.msal.loginPopup(req).subscribe({
+      next: () => this.router.navigateByUrl('/me')
+    });
   }
 
-  logout() { this.msal.logoutRedirect(); }
+  logout() {
+    this.msal.logoutRedirect().subscribe();
+  }
 
   goToMe() { this.router.navigateByUrl('/me'); }
 }
