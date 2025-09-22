@@ -1,7 +1,6 @@
 name: Deploy API (.NET) to App Service (AFD Private Link)
 
 on:
-  
   push:
     branches: [ master, main ]
     paths:
