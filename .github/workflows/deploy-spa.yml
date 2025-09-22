@@ -1,21 +1,12 @@
 name: Deploy SPA (Angular) to Static Website + Purge AFD
 
-
-
 on:
   push:
     branches: [ master, main ]
-    # remove paths filter if you want to deploy on every merge
     paths:
       - 'spa/**'
       - '.github/workflows/deploy-spa.yml'
   workflow_dispatch:
-
-env:
-  AZURE_RG: ${{ vars.AZURE_RG }}
-  STORAGE_ACCOUNT_NAME: ${{ vars.STORAGE_ACCOUNT_NAME }}
-  AFD_PROFILE: ${{ vars.AFD_PROFILE }}
-  AFD_ENDPOINT: ${{ vars.AFD_ENDPOINT }}
 
 permissions:
   id-token: write
@@ -24,6 +15,13 @@ permissions:
 concurrency:
   group: deploy-spa-${{ github.ref }}
   cancel-in-progress: false
+
+env:
+  AZURE_RG: ${{ vars.AZURE_RG }}
+  # You can set either of these in repo Variables (Settings → Variables → Actions)
+  DEPLOY_SA_NAME: ${{ vars.DEPLOY_SA_NAME }}
+  AFD_PROFILE: ${{ vars.AFD_PROFILE }}
+  AFD_ENDPOINT: ${{ vars.AFD_ENDPOINT }}
 
 jobs:
   deploy-spa:
@@ -45,11 +43,28 @@ jobs:
           tenant-id: ${{ secrets.AZURE_TENANT_ID }}
           subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
 
+      - name: Resolve Storage Account name
+        id: sa
+        run: |
+          if [ -n "${DEPLOY_SA_NAME:-}" ]; then
+            echo "name=$DEPLOY_SA_NAME" >> "$GITHUB_OUTPUT"
+          elif [ -n "${DEPLOY_SA_NAME:-}" ]; then
+            echo "name=$DEPLOY_SA_NAME" >> "$GITHUB_OUTPUT"
+          else
+            echo "ERROR: Set repo variable DEPLOY_SA_NAME or DEPLOY_SA_NAME." >&2
+            exit 1
+          fi
+          echo "Using Storage Account: $(grep name= "$GITHUB_OUTPUT" | cut -d= -f2)"
+
+      - name: Export AZURE_STORAGE_ACCOUNT for CLI
+        run: |
+          echo "AZURE_STORAGE_ACCOUNT=${{ steps.sa.outputs.name }}" >> $GITHUB_ENV
+          az storage account show -n "${{ steps.sa.outputs.name }}" -g "$AZURE_RG" -o table
+
       - name: Install & Build Angular
         working-directory: spa/minimalamp-spa
         run: |
           npm ci
-          # Try script first; fallback to the Angular CLI
           npm run build --if-present || npx ng build --configuration production
 
       - name: Detect Angular output path
@@ -62,15 +77,30 @@ jobs:
           else
             echo "Build output not found"; exit 1
           fi
+          echo "Publishing from: ${{ steps.outpath.outputs.path }}"
+
+      - name: Ensure Static Website is enabled (index + 404 → index.html)
+        run: |
+          az storage blob service-properties update \
+            --static-website \
+            --index-document index.html \
+            --404-document index.html
 
       - name: Upload to Static Website ($web)
         run: |
           az storage blob upload-batch \
             -s "${{ steps.outpath.outputs.path }}" \
             -d '$web' \
-            --account-name "$STORAGE_ACCOUNT_NAME" \
             --overwrite \
             --auth-mode login
+
+      - name: Set no-cache for index.html (avoid stale shell)
+        run: |
+          az storage blob update \
+            --container-name '$web' \
+            --name 'index.html' \
+            --content-cache-control 'no-cache, no-store, must-revalidate' \
+            --auth-mode login || true
 
       - name: Purge AFD endpoint cache
         if: ${{ env.AFD_PROFILE != '' && env.AFD_ENDPOINT != '' }}
