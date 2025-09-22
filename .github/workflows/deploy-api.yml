@@ -47,18 +47,29 @@ jobs:
           tenant-id: ${{ secrets.AZURE_TENANT_ID }}
           subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
 
-      - name: Build & Publish
-        working-directory: api
+      - name: Build & Publish (.NET)
         run: |
-          dotnet restore
-          dotnet publish -c Release -o publish
+          set -e
+          dotnet restore ./api/*.csproj
+          dotnet publish ./api/*.csproj -c Release -o "$RUNNER_TEMP/api-publish"
+          echo "Publish dir: $RUNNER_TEMP/api-publish"
+          ls -la "$RUNNER_TEMP/api-publish"
+      
+      - name: Package artifact (zip)
+        run: |
+          cd "$RUNNER_TEMP/api-publish"
+          zip -r "$RUNNER_TEMP/api.zip" .
+          echo "Zipped to $RUNNER_TEMP/api.zip"
+          ls -lh "$RUNNER_TEMP/api.zip"
 
-      - name: Deploy to App Service
+      - name: Deploy to App Service (zip)
         run: |
           az webapp deploy \
             --resource-group "$AZURE_RG" \
             --name "$WEBAPP_NAME" \
-            --src-path "api/publish"
+            --type zip \
+            --src-path "$RUNNER_TEMP/api.zip"
+
 
       - name: Purge AFD endpoint cache
         if: ${{ env.AFD_PROFILE != '' && env.AFD_ENDPOINT != '' }}
