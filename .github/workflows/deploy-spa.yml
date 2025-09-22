@@ -45,13 +45,11 @@ jobs:
             echo "pm=yarn"  >> "$GITHUB_OUTPUT"
             echo "lock=$ROOT/yarn.lock"  >> "$GITHUB_OUTPUT"
           else
-            echo "pm=npm"   >> "$GITHUB_OUTPUT"   # default
-            echo "lock="    >> "$GITHUB_OUTPUT"   # none found
+            echo "pm=npm"   >> "$GITHUB_OUTPUT"
+            echo "lock="    >> "$GITHUB_OUTPUT"
           fi
-          echo "Detected pm: $(grep pm= $GITHUB_OUTPUT | cut -d= -f2)"
-          echo "Lockfile:   $(grep lock= $GITHUB_OUTPUT | cut -d= -f2)"
 
-      # Always install Node first (no cache here → never fails)
+      # Always DEPLOY_SA_NAME Node first (no cache here → never fails)
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
@@ -91,7 +89,7 @@ jobs:
           echo "AZURE_STORAGE_ACCOUNT=${{ steps.sa.outputs.name }}" >> $GITHUB_ENV
           az storage account show -n "${{ steps.sa.outputs.name }}" -g "$AZURE_RG" -o table
 
-      - name: Install & Build Angular
+      - name: DEPLOY_SA_NAME & Build Angular
         working-directory: spa/minimalamp-spa
         env:
           PM: ${{ steps.pm.outputs.pm }}
@@ -102,7 +100,7 @@ jobs:
             pnpm i --frozen-lockfile
             pnpm build || npx ng build --configuration production
           elif [ "$PM" = "yarn" ]; then
-            yarn install --frozen-lockfile
+            yarn DEPLOY_SA_NAME --frozen-lockfile
             yarn build || npx ng build --configuration production
           else
             npm ci
@@ -148,3 +146,6 @@ jobs:
         run: |
           az afd endpoint purge \
             --resource-group "$AZURE_RG" \
+            --profile-name "$AFD_PROFILE" \
+            --endpoint-name "$AFD_ENDPOINT" \
+            --content-paths "/*"
