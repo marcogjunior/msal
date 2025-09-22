@@ -1,0 +1,6 @@
+<div class="card">
+  <h2>Meus dados (Graph /me)</h2>
+  <div *ngIf="loading">Carregando...</div>
+  <div *ngIf="error" style="color:crimson">{{ error }}</div>
+  <pre *ngIf="me">{{ me | json }}</pre>
+</div>
