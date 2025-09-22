@@ -3,8 +3,11 @@ name: Deploy SPA (Angular) to Static Website + Purge AFD
 on:
   push:
     branches: [ master, main ]
+    # widen a bit so pushes that touch SPA files trigger the job
     paths:
       - 'spa/**'
+      - '**/angular.json'
+      - '**/package.json'
       - '.github/workflows/deploy-spa.yml'
   workflow_dispatch:
 
@@ -17,15 +20,14 @@ concurrency:
   cancel-in-progress: false
 
 env:
-  # === Infra vars (set these as repo Variables) ===
   AZURE_RG: ${{ vars.AZURE_RG }}
+  # Optional override: repo variable with the folder that contains package.json
+  SPA_ROOT: ${{ vars.SPA_ROOT }}
+  # One of these must be set in repo Variables
+  DEPLOY_SA_NAME: ${{ vars.DEPLOY_SA_NAME }}
+
   AFD_PROFILE: ${{ vars.AFD_PROFILE }}
   AFD_ENDPOINT: ${{ vars.AFD_ENDPOINT }}
-  # Use ONE of these for the Storage Account name:
-  DEPLOY_SA_NAME: ${{ vars.DEPLOY_SA_NAME }}
-  
-  # === Your SPA root (based on your screenshot) ===
-  SPA_ROOT: spa/scaffold
 
 jobs:
   deploy-spa:
@@ -33,22 +35,40 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # Quick sanity (helps if paths are wrong)
-      - name: Show repo tree (top levels)
+      # 0) Locate SPA root (folder that has package.json). SPA_ROOT var wins.
+      - name: Detect SPA root
+        id: root
+        shell: bash
         run: |
-          echo "PWD: $(pwd)"
-          find . -maxdepth 3 -type d -print | sed 's|^\./||' | head -n 200
+          set -e
+          pick_first() { for p in "$@"; do [ -n "$p" ] && [ -d "$p" ] && echo "$p" && return 0; done; return 1; }
 
-      # Detect package manager at SPA_ROOT
+          if [ -n "${SPA_ROOT:-}" ] && [ -f "${SPA_ROOT%/}/package.json" ]; then
+            echo "dir=${SPA_ROOT%/}" >> "$GITHUB_OUTPUT"; exit 0
+          fi
+
+          # prefer under spa/** if present
+          CAND=$(git ls-files "spa/**/package.json" | head -n1 | xargs -r dirname)
+          if [ -z "$CAND" ]; then
+            CAND=$(git ls-files "**/package.json" | head -n1 | xargs -r dirname)
+          fi
+
+          if [ -z "$CAND" ]; then
+            echo "Repo tree (top 3 levels):"; find . -maxdepth 3 -type d | sed 's|^\./||' | sort | head -n 200
+            echo "ERROR: Could not find any package.json. Set SPA_ROOT to your SPA folder." >&2
+            exit 1
+          fi
+
+          echo "dir=$CAND" >> "$GITHUB_OUTPUT"
+          echo "Found SPA root: $CAND"
+
+      # 1) Detect package manager + lockfile in that root
       - name: Detect package manager
         id: pm
         shell: bash
         run: |
           set -e
-          ROOT="${SPA_ROOT}"
-          if [ ! -d "$ROOT" ]; then
-            echo "ERROR: SPA_ROOT '$ROOT' not found." >&2; exit 1
-          fi
+          ROOT="${{ steps.root.outputs.dir }}"
           if [ -f "$ROOT/pnpm-lock.yaml" ]; then
             echo "pm=pnpm"  >> "$GITHUB_OUTPUT"; echo "lock=$ROOT/pnpm-lock.yaml"  >> "$GITHUB_OUTPUT"
           elif [ -f "$ROOT/package-lock.json" ]; then
@@ -59,6 +79,7 @@ jobs:
             echo "pm=npm"   >> "$GITHUB_OUTPUT"; echo "lock=" >> "$GITHUB_OUTPUT"
           fi
 
+      # 2) Node setup (cache only if lockfile exists)
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
@@ -72,6 +93,7 @@ jobs:
           cache: ${{ steps.pm.outputs.pm }}
           cache-dependency-path: ${{ steps.pm.outputs.lock }}
 
+      # 3) Azure login
       - name: Login to Azure (OIDC)
         uses: azure/login@v2
         with:
@@ -79,7 +101,7 @@ jobs:
           tenant-id: ${{ secrets.AZURE_TENANT_ID }}
           subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
 
-      # Resolve Storage Account name and export for CLI
+      # 4) Resolve Storage Account and export for CLI
       - name: Resolve Storage Account name
         id: sa
         shell: bash
@@ -97,9 +119,9 @@ jobs:
           echo "AZURE_STORAGE_ACCOUNT=${{ steps.sa.outputs.name }}" >> $GITHUB_ENV
           az storage account show -n "${{ steps.sa.outputs.name }}" -g "$AZURE_RG" -o table
 
-      # Build from spa/scaffold (works with/without global Angular CLI)
+      # 5) Install & Build Angular from detected root
       - name: Install & Build Angular
-        working-directory: ${{ env.SPA_ROOT }}
+        working-directory: ${{ steps.root.outputs.dir }}
         env:
           PM: ${{ steps.pm.outputs.pm }}
           LOCK: ${{ steps.pm.outputs.lock }}
@@ -107,53 +129,33 @@ jobs:
         run: |
           set -e
           corepack enable || true
-
           if [ "$PM" = "pnpm" ]; then
             if [ -n "$LOCK" ]; then pnpm i --frozen-lockfile; else pnpm i; fi
             pnpm build || npx -y @angular/cli@latest ng build --configuration production
-
           elif [ "$PM" = "yarn" ]; then
             if [ -n "$LOCK" ]; then yarn install --frozen-lockfile; else yarn install; fi
             yarn build || npx -y @angular/cli@latest ng build --configuration production
-
-          else  # npm
+          else
             if [ -n "$LOCK" ]; then npm ci; else npm install; fi
             npm run build --if-present || npx -y @angular/cli@latest ng build --configuration production
           fi
 
-              working-directory: ${{ env.SPA_ROOT }}
-              env:
-                PM: ${{ steps.pm.outputs.pm }}
-              shell: bash
-              run: |
-                set -e
-                corepack enable || true
-                if [ "$PM" = "pnpm" ]; then
-                  pnpm i --frozen-lockfile
-                  pnpm build || npx -y @angular/cli@latest ng build --configuration production
-                elif [ "$PM" = "yarn" ]; then
-                  yarn install --frozen-lockfile
-                  yarn build || npx -y @angular/cli@latest ng build --configuration production
-                else
-                  npm ci
-                  npm run build --if-present || npx -y @angular/cli@latest ng build --configuration production
-                fi
-
-            # Find dist/**/index.html under spa/scaffold
+      # 6) Detect dist output (first index.html)
       - name: Detect Angular output path
         id: outpath
         shell: bash
         run: |
           set -e
-          ROOT="${SPA_ROOT}"
+          ROOT="${{ steps.root.outputs.dir }}"
           FILE=$(find "$ROOT/dist" -type f -name index.html | head -n1 || true)
           if [ -z "$FILE" ]; then
             echo "Build output not found under $ROOT/dist"; ls -R "$ROOT" || true; exit 1
           fi
           DIR=$(dirname "$FILE")
           echo "path=$DIR" >> "$GITHUB_OUTPUT"
-          echo "Will publish from: $DIR"
+          echo "Publish from: $DIR"
 
+      # 7) Enable Static Website
       - name: Enable Static Website (index + 404 → index.html)
         run: |
           az storage blob service-properties update \
@@ -161,6 +163,7 @@ jobs:
             --index-document index.html \
             --404-document index.html
 
+      # 8) Upload to $web
       - name: Upload to Static Website ($web)
         run: |
           az storage blob upload-batch \
@@ -169,6 +172,7 @@ jobs:
             --overwrite \
             --auth-mode login
 
+      # 9) Prevent stale SPA shell
       - name: Set no-cache for index.html
         run: |
           az storage blob update \
@@ -177,6 +181,7 @@ jobs:
             --content-cache-control 'no-cache, no-store, must-revalidate' \
             --auth-mode login || true
 
+      # 10) Purge AFD
       - name: Purge AFD endpoint cache
         if: ${{ env.AFD_PROFILE != '' && env.AFD_ENDPOINT != '' }}
         run: |
