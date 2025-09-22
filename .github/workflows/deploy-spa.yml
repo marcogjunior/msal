@@ -29,12 +29,28 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # Detect package manager + lockfile (npm/pnpm/yarn)
+      # 0) Find the SPA root under spa/** (prefer angular.json, fallback to package.json)
+      - name: Detect SPA root
+        id: root
+        run: |
+          set -e
+          FILE=$(git ls-files 'spa/**/angular.json' | head -n1)
+          if [ -z "$FILE" ]; then
+            FILE=$(git ls-files 'spa/**/package.json' | head -n1)
+          fi
+          if [ -z "$FILE" ]; then
+            echo "No Angular project found under spa/**"; exit 1
+          fi
+          DIR=$(dirname "$FILE")
+          echo "dir=$DIR" >> "$GITHUB_OUTPUT"
+          echo "Found SPA root: $DIR"
+
+      # 1) Detect package manager + lockfile in that root
       - name: Detect package manager
         id: pm
         run: |
           set -e
-          ROOT="spa/minimalamp-spa"
+          ROOT="${{ steps.root.outputs.dir }}"
           if [ -f "$ROOT/pnpm-lock.yaml" ]; then
             echo "pm=pnpm"  >> "$GITHUB_OUTPUT"
             echo "lock=$ROOT/pnpm-lock.yaml"  >> "$GITHUB_OUTPUT"
@@ -48,14 +64,15 @@ jobs:
             echo "pm=npm"   >> "$GITHUB_OUTPUT"
             echo "lock="    >> "$GITHUB_OUTPUT"
           fi
+          echo "PM:   $(grep pm= $GITHUB_OUTPUT | cut -d= -f2)"
+          echo "Lock: $(grep lock= $GITHUB_OUTPUT | cut -d= -f2)"
 
-      # Always DEPLOY_SA_NAME Node first (no cache here → never fails)
+      # 2) Install Node (always), enable cache only if lockfile exists
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
           node-version: '20'
 
-      # Enable cache only if we actually have a lockfile
       - name: Enable dependency cache
         if: ${{ steps.pm.outputs.lock != '' }}
         uses: actions/setup-node@v4
@@ -64,6 +81,7 @@ jobs:
           cache: ${{ steps.pm.outputs.pm }}
           cache-dependency-path: ${{ steps.pm.outputs.lock }}
 
+      # 3) Azure login
       - name: Login to Azure (OIDC)
         uses: azure/login@v2
         with:
@@ -71,7 +89,7 @@ jobs:
           tenant-id: ${{ secrets.AZURE_TENANT_ID }}
           subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
 
-      # Resolve SA name and export for Azure CLI
+      # 4) Resolve Storage Account and export for CLI
       - name: Resolve Storage Account name
         id: sa
         run: |
@@ -89,8 +107,9 @@ jobs:
           echo "AZURE_STORAGE_ACCOUNT=${{ steps.sa.outputs.name }}" >> $GITHUB_ENV
           az storage account show -n "${{ steps.sa.outputs.name }}" -g "$AZURE_RG" -o table
 
-      - name: DEPLOY_SA_NAME & Build Angular
-        working-directory: spa/minimalamp-spa
+      # 5) Install & Build Angular from detected root
+      - name: Install & Build Angular
+        working-directory: ${{ steps.root.outputs.dir }}
         env:
           PM: ${{ steps.pm.outputs.pm }}
         run: |
@@ -100,31 +119,36 @@ jobs:
             pnpm i --frozen-lockfile
             pnpm build || npx ng build --configuration production
           elif [ "$PM" = "yarn" ]; then
-            yarn DEPLOY_SA_NAME --frozen-lockfile
+            yarn install --frozen-lockfile
             yarn build || npx ng build --configuration production
           else
             npm ci
             npm run build --if-present || npx ng build --configuration production
           fi
 
+      # 6) Find the built dist path (looks for first index.html under dist)
       - name: Detect Angular output path
         id: outpath
         run: |
-          if [ -d "spa/minimalamp-spa/dist/minimalamp-spa/browser" ]; then
-            echo "path=spa/minimalamp-spa/dist/minimalamp-spa/browser" >> $GITHUB_OUTPUT
-          elif [ -d "spa/minimalamp-spa/dist/minimalamp-spa" ]; then
-            echo "path=spa/minimalamp-spa/dist/minimalamp-spa" >> $GITHUB_OUTPUT
-          else
-            echo "Build output not found"; exit 1
+          set -e
+          ROOT="${{ steps.root.outputs.dir }}"
+          FILE=$(find "$ROOT/dist" -type f -name index.html | head -n1 || true)
+          if [ -z "$FILE" ]; then
+            echo "Build output not found under $ROOT/dist"; ls -R "$ROOT" || true; exit 1
           fi
+          DIR=$(dirname "$FILE")
+          echo "path=$DIR" >> "$GITHUB_OUTPUT"
+          echo "Publish from: $DIR"
 
-      - name: Ensure Static Website is enabled (index + 404 → index.html)
+      # 7) Ensure Static Website is enabled
+      - name: Enable Static Website (index + 404 → index.html)
         run: |
           az storage blob service-properties update \
             --static-website \
             --index-document index.html \
             --404-document index.html
 
+      # 8) Upload build to $web
       - name: Upload to Static Website ($web)
         run: |
           az storage blob upload-batch \
@@ -133,6 +157,7 @@ jobs:
             --overwrite \
             --auth-mode login
 
+      # 9) Prevent stale SPA shell
       - name: Set no-cache for index.html
         run: |
           az storage blob update \
@@ -141,6 +166,7 @@ jobs:
             --content-cache-control 'no-cache, no-store, must-revalidate' \
             --auth-mode login || true
 
+      # 10) Purge AFD
       - name: Purge AFD endpoint cache
         if: ${{ env.AFD_PROFILE != '' && env.AFD_ENDPOINT != '' }}
         run: |
