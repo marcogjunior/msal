@@ -3,6 +3,7 @@ name: Deploy SPA (Angular) to Static Website + Purge AFD
 on:
   push:
     branches: [ master, main ]
+    # If your SPA isn't under spa/**, remove or change these paths
     paths:
       - 'spa/**'
       - '.github/workflows/deploy-spa.yml'
@@ -18,7 +19,8 @@ concurrency:
 
 env:
   AZURE_RG: ${{ vars.AZURE_RG }}
-  # Set ONE of these in repo Variables (Settings → Variables → Actions)
+  # Optional override: set repo variable SPA_ROOT (e.g., "web/my-spa")
+  SPA_ROOT: ${{ vars.SPA_ROOT }}
   DEPLOY_SA_NAME: ${{ vars.DEPLOY_SA_NAME }}
   AFD_PROFILE: ${{ vars.AFD_PROFILE }}
   AFD_ENDPOINT: ${{ vars.AFD_ENDPOINT }}
@@ -29,50 +31,51 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # 0) Find the SPA root under spa/** (prefer angular.json, fallback to package.json)
+      # 0) Find the SPA root (SPA_ROOT var > angular.json under spa/** > any angular.json > package.json with @angular/core)
       - name: Detect SPA root
         id: root
+        shell: bash
         run: |
           set -e
-          FILE=$(git ls-files 'spa/**/angular.json' | head -n1)
-          if [ -z "$FILE" ]; then
-            FILE=$(git ls-files 'spa/**/package.json' | head -n1)
+          if [ -n "${SPA_ROOT:-}" ] && [ -d "$SPA_ROOT" ]; then
+            echo "dir=$SPA_ROOT" >> "$GITHUB_OUTPUT"; exit 0
           fi
-          if [ -z "$FILE" ]; then
-            echo "No Angular project found under spa/**"; exit 1
+          CAND=$(find ./spa -type f -name angular.json -printf '%h\n' 2>/dev/null | head -n1 || true)
+          if [ -z "$CAND" ]; then
+            CAND=$(find . -type f -name angular.json -printf '%h\n' | head -n1 || true)
           fi
-          DIR=$(dirname "$FILE")
-          echo "dir=$DIR" >> "$GITHUB_OUTPUT"
-          echo "Found SPA root: $DIR"
+          if [ -z "$CAND" ]; then
+            CAND=$(grep -rl --include=package.json '"@angular/core"' . | xargs -r -n1 dirname | head -n1 || true)
+          fi
+          if [ -z "$CAND" ]; then
+            echo "Could not find an Angular project. Set repo variable SPA_ROOT (e.g., web/app)." >&2
+            exit 1
+          fi
+          echo "dir=$CAND" >> "$GITHUB_OUTPUT"
+          echo "Found SPA root: $CAND"
 
       # 1) Detect package manager + lockfile in that root
       - name: Detect package manager
         id: pm
+        shell: bash
         run: |
           set -e
           ROOT="${{ steps.root.outputs.dir }}"
           if [ -f "$ROOT/pnpm-lock.yaml" ]; then
-            echo "pm=pnpm"  >> "$GITHUB_OUTPUT"
-            echo "lock=$ROOT/pnpm-lock.yaml"  >> "$GITHUB_OUTPUT"
+            echo "pm=pnpm"  >> "$GITHUB_OUTPUT"; echo "lock=$ROOT/pnpm-lock.yaml"  >> "$GITHUB_OUTPUT"
           elif [ -f "$ROOT/package-lock.json" ]; then
-            echo "pm=npm"   >> "$GITHUB_OUTPUT"
-            echo "lock=$ROOT/package-lock.json"  >> "$GITHUB_OUTPUT"
+            echo "pm=npm"   >> "$GITHUB_OUTPUT"; echo "lock=$ROOT/package-lock.json"  >> "$GITHUB_OUTPUT"
           elif [ -f "$ROOT/yarn.lock" ]; then
-            echo "pm=yarn"  >> "$GITHUB_OUTPUT"
-            echo "lock=$ROOT/yarn.lock"  >> "$GITHUB_OUTPUT"
+            echo "pm=yarn"  >> "$GITHUB_OUTPUT"; echo "lock=$ROOT/yarn.lock"  >> "$GITHUB_OUTPUT"
           else
-            echo "pm=npm"   >> "$GITHUB_OUTPUT"
-            echo "lock="    >> "$GITHUB_OUTPUT"
+            echo "pm=npm"   >> "$GITHUB_OUTPUT"; echo "lock="    >> "$GITHUB_OUTPUT"
           fi
-          echo "PM:   $(grep pm= $GITHUB_OUTPUT | cut -d= -f2)"
-          echo "Lock: $(grep lock= $GITHUB_OUTPUT | cut -d= -f2)"
 
-      # 2) Install Node (always), enable cache only if lockfile exists
+      # 2) Node install (cache only if lockfile exists)
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
           node-version: '20'
-
       - name: Enable dependency cache
         if: ${{ steps.pm.outputs.lock != '' }}
         uses: actions/setup-node@v4
@@ -92,16 +95,15 @@ jobs:
       # 4) Resolve Storage Account and export for CLI
       - name: Resolve Storage Account name
         id: sa
+        shell: bash
         run: |
           if [ -n "${DEPLOY_SA_NAME:-}" ]; then
             echo "name=$DEPLOY_SA_NAME" >> "$GITHUB_OUTPUT"
           elif [ -n "${DEPLOY_SA_NAME:-}" ]; then
             echo "name=$DEPLOY_SA_NAME" >> "$GITHUB_OUTPUT"
           else
-            echo "ERROR: Set repo variable DEPLOY_SA_NAME or DEPLOY_SA_NAME." >&2
-            exit 1
+            echo "ERROR: Set repo variable DEPLOY_SA_NAME or DEPLOY_SA_NAME." >&2; exit 1
           fi
-
       - name: Export AZURE_STORAGE_ACCOUNT for CLI
         run: |
           echo "AZURE_STORAGE_ACCOUNT=${{ steps.sa.outputs.name }}" >> $GITHUB_ENV
@@ -112,6 +114,7 @@ jobs:
         working-directory: ${{ steps.root.outputs.dir }}
         env:
           PM: ${{ steps.pm.outputs.pm }}
+        shell: bash
         run: |
           set -e
           corepack enable || true
@@ -126,9 +129,10 @@ jobs:
             npm run build --if-present || npx ng build --configuration production
           fi
 
-      # 6) Find the built dist path (looks for first index.html under dist)
+      # 6) Find the built dist path (first index.html)
       - name: Detect Angular output path
         id: outpath
+        shell: bash
         run: |
           set -e
           ROOT="${{ steps.root.outputs.dir }}"
@@ -140,7 +144,7 @@ jobs:
           echo "path=$DIR" >> "$GITHUB_OUTPUT"
           echo "Publish from: $DIR"
 
-      # 7) Ensure Static Website is enabled
+      # 7) Enable Static Website
       - name: Enable Static Website (index + 404 → index.html)
         run: |
           az storage blob service-properties update \
