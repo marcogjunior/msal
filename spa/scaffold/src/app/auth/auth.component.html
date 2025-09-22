@@ -1,0 +1,15 @@
+<div class="card">
+  <h1>Autenticação (MSAL)</h1>
+  <div *ngIf="!loggedIn; else logged">
+    <p>Você não está autenticado.</p>
+    <button (click)="loginRedirect()">Entrar (Redirect)</button>
+    <button (click)="loginPopup()">Entrar (Popup)</button>
+  </div>
+  <ng-template #logged>
+    <p>Conectado como <strong>{{ userName }}</strong></p>
+    <div class="actions">
+      <button (click)="goToMe()">Ver meus dados</button>
+      <button (click)="logout()">Sair</button>
+    </div>
+  </ng-template>
+</div>
