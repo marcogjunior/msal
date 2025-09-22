@@ -18,7 +18,7 @@ concurrency:
 
 env:
   AZURE_RG: ${{ vars.AZURE_RG }}
-  # You can set either of these in repo Variables (Settings → Variables → Actions)
+  # Set ONE of these in repo Variables (Settings → Variables → Actions)
   DEPLOY_SA_NAME: ${{ vars.DEPLOY_SA_NAME }}
   AFD_PROFILE: ${{ vars.AFD_PROFILE }}
   AFD_ENDPOINT: ${{ vars.AFD_ENDPOINT }}
@@ -29,12 +29,42 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # Detect package manager + lockfile (npm/pnpm/yarn)
+      - name: Detect package manager
+        id: pm
+        run: |
+          set -e
+          ROOT="spa/minimalamp-spa"
+          if [ -f "$ROOT/pnpm-lock.yaml" ]; then
+            echo "pm=pnpm"  >> "$GITHUB_OUTPUT"
+            echo "lock=$ROOT/pnpm-lock.yaml"  >> "$GITHUB_OUTPUT"
+          elif [ -f "$ROOT/package-lock.json" ]; then
+            echo "pm=npm"   >> "$GITHUB_OUTPUT"
+            echo "lock=$ROOT/package-lock.json"  >> "$GITHUB_OUTPUT"
+          elif [ -f "$ROOT/yarn.lock" ]; then
+            echo "pm=yarn"  >> "$GITHUB_OUTPUT"
+            echo "lock=$ROOT/yarn.lock"  >> "$GITHUB_OUTPUT"
+          else
+            echo "pm=npm"   >> "$GITHUB_OUTPUT"   # default
+            echo "lock="    >> "$GITHUB_OUTPUT"   # none found
+          fi
+          echo "Detected pm: $(grep pm= $GITHUB_OUTPUT | cut -d= -f2)"
+          echo "Lockfile:   $(grep lock= $GITHUB_OUTPUT | cut -d= -f2)"
+
+      # Always install Node first (no cache here → never fails)
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
           node-version: '20'
-          cache: 'npm'
-          cache-dependency-path: 'spa/minimalamp-spa/package-lock.json'
+
+      # Enable cache only if we actually have a lockfile
+      - name: Enable dependency cache
+        if: ${{ steps.pm.outputs.lock != '' }}
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: ${{ steps.pm.outputs.pm }}
+          cache-dependency-path: ${{ steps.pm.outputs.lock }}
 
       - name: Login to Azure (OIDC)
         uses: azure/login@v2
@@ -43,6 +73,7 @@ jobs:
           tenant-id: ${{ secrets.AZURE_TENANT_ID }}
           subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
 
+      # Resolve SA name and export for Azure CLI
       - name: Resolve Storage Account name
         id: sa
         run: |
@@ -54,7 +85,6 @@ jobs:
             echo "ERROR: Set repo variable DEPLOY_SA_NAME or DEPLOY_SA_NAME." >&2
             exit 1
           fi
-          echo "Using Storage Account: $(grep name= "$GITHUB_OUTPUT" | cut -d= -f2)"
 
       - name: Export AZURE_STORAGE_ACCOUNT for CLI
         run: |
@@ -63,9 +93,21 @@ jobs:
 
       - name: Install & Build Angular
         working-directory: spa/minimalamp-spa
+        env:
+          PM: ${{ steps.pm.outputs.pm }}
         run: |
-          npm ci
-          npm run build --if-present || npx ng build --configuration production
+          set -e
+          corepack enable || true
+          if [ "$PM" = "pnpm" ]; then
+            pnpm i --frozen-lockfile
+            pnpm build || npx ng build --configuration production
+          elif [ "$PM" = "yarn" ]; then
+            yarn install --frozen-lockfile
+            yarn build || npx ng build --configuration production
+          else
+            npm ci
+            npm run build --if-present || npx ng build --configuration production
+          fi
 
       - name: Detect Angular output path
         id: outpath
@@ -77,7 +119,6 @@ jobs:
           else
             echo "Build output not found"; exit 1
           fi
-          echo "Publishing from: ${{ steps.outpath.outputs.path }}"
 
       - name: Ensure Static Website is enabled (index + 404 → index.html)
         run: |
@@ -94,7 +135,7 @@ jobs:
             --overwrite \
             --auth-mode login
 
-      - name: Set no-cache for index.html (avoid stale shell)
+      - name: Set no-cache for index.html
         run: |
           az storage blob update \
             --container-name '$web' \
@@ -107,6 +148,3 @@ jobs:
         run: |
           az afd endpoint purge \
             --resource-group "$AZURE_RG" \
-            --profile-name "$AFD_PROFILE" \
-            --endpoint-name "$AFD_ENDPOINT" \
-            --content-paths "/*"
