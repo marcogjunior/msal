@@ -3,7 +3,7 @@ export const environment = {
 
   // Entra ID (SPA)
   auth: {
-    clientId: '0eff342c-2653-4f39-8701-52201f42ed3d',
+    clientId: 'a87d4e91-dc9d-4565-b97d-fa7af7346c21',
     tenantId: '6dbb1d5c-d749-4eda-9302-4967a4675d09',
     // Use o domínio público do seu site (replique exatamente no App Registration > Redirect URIs)
     redirectUri: 'https://minimalamp-ep-erfhf2d8f4bjb2c9.z03.azurefd.net/auth',
@@ -20,8 +20,8 @@ export const environment = {
   // Produção chama sua API atrás do Front Door
   api: {
     baseUrl: 'https://minimalamp-ep-erfhf2d8f4bjb2c9.z03.azurefd.net',          // roteie no AFD para o backend da API
-    identifier: 'api://000a147f-f391-4b7b-ab57-6de0f1b1d30d',
-    scopes: ['api://000a147f-f391-4b7b-ab57-6de0f1b1d30d/access_as_user'],
+    identifier: 'api://97569815-6fd5-4d2c-9057-c7dc2c239daf',
+    scopes: ['api://97569815-6fd5-4d2c-9057-c7dc2c239daf/access_as_user'],
     clientId: '000a147f-f391-4b7b-ab57-6de0f1b1d30d'
   },
 
