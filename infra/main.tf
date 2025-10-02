@@ -160,7 +160,7 @@ resource "azurerm_cdn_frontdoor_origin_group" "og_api" {
   health_probe {
     protocol            = "Https"
     interval_in_seconds = 30
-    path                = "/public/ping"
+    path                = "/api/ping"
     request_type        = "GET"
   }
 
@@ -261,11 +261,7 @@ resource "azurerm_role_assignment" "uploader_current_user" {
   principal_id         = data.azuread_client_config.current.object_id
 }
 
-resource "azurerm_role_assignment" "uploader_current_user" {
-  scope                = azurerm_storage_account.spa.id
-  role_definition_name = "Storage Blob Data Contributor"
-  principal_id         = data.azuread_client_config.current.object_id
-}
+
 # ---------------- Outputs ----------------
 
 output "resource_group_name" { value = azurerm_resource_group.rg.name }
