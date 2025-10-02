@@ -8,6 +8,21 @@ var tenantId      = Environment.GetEnvironmentVariable("TENANT_ID")     ?? "6dbb
 var apiAudience   = Environment.GetEnvironmentVariable("API_IDENTIFIER") ?? "api://97569815-6fd5-4d2c-9057-c7dc2c239daf";
 var requiredScope = Environment.GetEnvironmentVariable("API_SCOPE")      ?? "api://97569815-6fd5-4d2c-9057-c7dc2c239daf/access_as_user";
 
+
+builder.Services.AddCors(options =>
+{
+    options.AddPolicy("AllowSpa", policy =>
+    {
+        policy.WithOrigins(
+            "https://minimalamp-ep-erfhf2d8f4bjb2c9.z03.azurefd.net",
+            "https://minimalampspa2x2mbt.z15.web.core.windows.net",
+            "http://localhost:4200"
+        )
+        .AllowAnyHeader()
+        .AllowAnyMethod()
+        .AllowCredentials();
+    });
+});
 builder.Services
   .AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
   .AddJwtBearer(options =>
@@ -36,7 +51,7 @@ var app = builder.Build();
 app.UseHttpsRedirection();
 app.UseAuthentication();
 app.UseAuthorization();
-
+app.UseCors("AllowSpa");
 app.MapGet("/api/ping", () => new { ok = true, ts = DateTimeOffset.UtcNow });
 app.MapGet("/api/profile", (System.Security.Claims.ClaimsPrincipal user) =>
 {
