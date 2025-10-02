@@ -18,4 +18,5 @@ export class UserPageComponent implements OnInit {
       error: (err) => { this.error = (err?.message || 'Erro ao obter /api/profile'); this.loading = false; }
     });
   }
+  
 }
