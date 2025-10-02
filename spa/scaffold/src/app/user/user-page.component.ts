@@ -1,21 +1,22 @@
 import { Component, OnInit } from '@angular/core';
-import { GraphService } from '../core/graph.service';
+import { ApiService } from '../core/api-service';
 
 @Component({
   selector: 'app-user-page',
   templateUrl: './user-page.component.html'
 })
 export class UserPageComponent implements OnInit {
-  me: any = null;
+  profile: any = null;
   loading = true;
   error: string | null = null;
 
-  constructor(private graph: GraphService) {}
+  constructor(private api: ApiService) {}
 
   ngOnInit(): void {
-    this.graph.getMe().subscribe({
-      next: (data) => { this.me = data; this.loading = false; },
-      error: (err) => { this.error = (err?.message || 'Erro ao obter /me'); this.loading = false; }
+    this.api.getProfile().subscribe({
+      next: (data) => { this.profile = data; this.loading = false; },
+      error: (err) => { this.error = (err?.message || 'Erro ao obter /api/profile'); this.loading = false; }
     });
   }
+  
 }

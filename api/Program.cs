@@ -37,7 +37,7 @@ app.UseHttpsRedirection();
 app.UseAuthentication();
 app.UseAuthorization();
 
-app.MapGet("/public/ping", () => new { ok = true, ts = DateTimeOffset.UtcNow });
+app.MapGet("/api/ping", () => new { ok = true, ts = DateTimeOffset.UtcNow });
 app.MapGet("/api/profile", (System.Security.Claims.ClaimsPrincipal user) =>
 {
     var name = user.Identity?.Name ?? user.FindFirst("name")?.Value ?? "unknown";
