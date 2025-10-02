@@ -5,8 +5,8 @@ using Microsoft.IdentityModel.Tokens;
 var builder = WebApplication.CreateBuilder(args);
 
 var tenantId      = Environment.GetEnvironmentVariable("TENANT_ID")     ?? "6dbb1d5c-d749-4eda-9302-4967a4675d09";
-var apiAudience   = Environment.GetEnvironmentVariable("API_IDENTIFIER") ?? "api://000a147f-f391-4b7b-ab57-6de0f1b1d30d";
-var requiredScope = Environment.GetEnvironmentVariable("API_SCOPE")      ?? "api://000a147f-f391-4b7b-ab57-6de0f1b1d30d/access_as_user";
+var apiAudience   = Environment.GetEnvironmentVariable("API_IDENTIFIER") ?? "api://97569815-6fd5-4d2c-9057-c7dc2c239daf";
+var requiredScope = Environment.GetEnvironmentVariable("API_SCOPE")      ?? "api://97569815-6fd5-4d2c-9057-c7dc2c239daf/access_as_user";
 
 builder.Services
   .AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
