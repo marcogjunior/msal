@@ -19,8 +19,16 @@ locals {
   api_scope_value = "access_as_user"
 
   # IMPORTANT: trailing slash for root callback
-  spa_redirects = ["http://localhost:4200/"]
+  spa_redirects = [
+    "http://localhost:4200/",
+    "http://localhost:4200/auth",
+    "https://minimalamp-ep-erfhf2d8f4bjb2c9.z03.azurefd.net/auth",
+    "https://minimalamp-ep-erfhf2d8f4bjb2c9.z03.azurefd.net/",
+    "https://minimalampspa2x2mbt.z15.web.core.windows.net/auth",
+    "https://minimalampspa2x2mbt.z15.web.core.windows.net/"
+    ]
 }
+
 
 # ---------------- Core Infra ----------------
 resource "azurerm_resource_group" "rg" {
